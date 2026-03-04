@@ -2,9 +2,11 @@ package board
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/antopolskiy/kanban-md/internal/config"
+	"github.com/antopolskiy/kanban-md/internal/date"
 	"github.com/antopolskiy/kanban-md/internal/task"
 )
 
@@ -176,6 +178,34 @@ func enforceClassWIP(cfg *config.Config, t *task.Task, newStatus string) error {
 	return CheckWIPLimit(cfg, counts, newStatus, t.Status)
 }
 
+// enforceCreateWIP checks WIP limits for a new task (currentStatus is empty).
+func enforceCreateWIP(cfg *config.Config, t *task.Task) error {
+	if t.Class != "" && len(cfg.Classes) > 0 {
+		classConf := cfg.ClassByName(t.Class)
+		if classConf != nil && classConf.WIPLimit > 0 {
+			allTasks, _, err := task.ReadAllLenient(cfg.TasksPath())
+			if err != nil {
+				return fmt.Errorf("reading tasks for class WIP check: %w", err)
+			}
+			count := countByClass(allTasks, t.Class, t.ID)
+			if count >= classConf.WIPLimit {
+				return task.ValidateClassWIPExceeded(t.Class, classConf.WIPLimit, count)
+			}
+		}
+		if classConf != nil && classConf.BypassColumnWIP {
+			return nil
+		}
+	}
+
+	allTasks, _, err := task.ReadAllLenient(cfg.TasksPath())
+	if err != nil {
+		return fmt.Errorf("reading tasks for WIP check: %w", err)
+	}
+	counts := CountByStatus(allTasks)
+	// Empty currentStatus: new task is not in any column yet.
+	return CheckWIPLimit(cfg, counts, t.Status, "")
+}
+
 // countByClass counts tasks with a given class, excluding a specific task ID.
 func countByClass(tasks []*task.Task, class string, excludeID int) int {
 	count := 0
@@ -185,4 +215,143 @@ func countByClass(tasks []*task.Task, class string, excludeID int) int {
 		}
 	}
 	return count
+}
+
+// CreateParams contains the parameters for a Create operation.
+// Zero-value fields use config defaults (for Status, Priority, Class).
+type CreateParams struct {
+	Title     string
+	Status    string // empty = config default
+	Priority  string // empty = config default
+	Class     string // empty = config default
+	Assignee  string
+	Tags      []string
+	Body      string
+	Due       *date.Date
+	Estimate  string
+	Parent    *int
+	DependsOn []int
+	Claimant  string // if non-empty, sets claim on the task
+}
+
+// CreateResult is returned after a successful create.
+type CreateResult struct {
+	Task *task.Task
+	Path string
+}
+
+// Create creates a new task. The caller is responsible for:
+//   - Acquiring a file lock to prevent concurrent creates
+//   - Loading/reloading config to get the current NextID
+//
+// After Create returns, cfg.NextID is incremented and cfg is saved to disk.
+func Create(cfg *config.Config, params CreateParams, now time.Time) (*CreateResult, error) {
+	t := &task.Task{
+		ID:       cfg.NextID,
+		Title:    params.Title,
+		Status:   cfg.Defaults.Status,
+		Priority: cfg.Defaults.Priority,
+		Class:    cfg.Defaults.Class,
+		Created:  now,
+		Updated:  now,
+	}
+
+	// Apply non-zero params, validating against config.
+	if err := applyCreateParams(cfg, t, params, now); err != nil {
+		return nil, err
+	}
+
+	// Validate dependency references.
+	if err := validateDeps(cfg, t); err != nil {
+		return nil, err
+	}
+
+	// WIP limit enforcement (class-aware). For new tasks, the "current"
+	// status is empty because the task doesn't exist in any column yet.
+	if err := enforceCreateWIP(cfg, t); err != nil {
+		return nil, err
+	}
+
+	// Generate filename and write.
+	slug := task.GenerateSlug(params.Title)
+	filename := task.GenerateFilename(t.ID, slug)
+	path := filepath.Join(cfg.TasksPath(), filename)
+	t.File = path
+
+	if err := task.Write(path, t); err != nil {
+		return nil, fmt.Errorf("writing task: %w", err)
+	}
+
+	// Increment next_id and save config.
+	cfg.NextID++
+	if err := cfg.Save(); err != nil {
+		return nil, fmt.Errorf("saving config: %w", err)
+	}
+
+	LogMutation(cfg.Dir(), "create", t.ID, t.Title)
+
+	return &CreateResult{Task: t, Path: path}, nil
+}
+
+// applyCreateParams applies non-zero CreateParams fields to the task.
+func applyCreateParams(cfg *config.Config, t *task.Task, p CreateParams, now time.Time) error {
+	if p.Status != "" {
+		if err := task.ValidateStatus(p.Status, cfg.StatusNames()); err != nil {
+			return err
+		}
+		t.Status = p.Status
+	}
+	if p.Priority != "" {
+		if err := task.ValidatePriority(p.Priority, cfg.Priorities); err != nil {
+			return err
+		}
+		t.Priority = p.Priority
+	}
+	if p.Class != "" {
+		if err := task.ValidateClass(p.Class, cfg.ClassNames()); err != nil {
+			return err
+		}
+		t.Class = p.Class
+	}
+	if p.Assignee != "" {
+		t.Assignee = p.Assignee
+	}
+	if len(p.Tags) > 0 {
+		t.Tags = p.Tags
+	}
+	if p.Body != "" {
+		t.Body = p.Body
+	}
+	if p.Due != nil {
+		t.Due = p.Due
+	}
+	if p.Estimate != "" {
+		t.Estimate = p.Estimate
+	}
+	if p.Parent != nil {
+		t.Parent = p.Parent
+	}
+	if len(p.DependsOn) > 0 {
+		t.DependsOn = p.DependsOn
+	}
+	if p.Claimant != "" {
+		t.ClaimedBy = p.Claimant
+		t.ClaimedAt = &now
+	}
+	return nil
+}
+
+// validateDeps validates parent and dependency references for a task.
+func validateDeps(cfg *config.Config, t *task.Task) error {
+	if t.Parent != nil {
+		if err := task.ValidateDependencyIDs(cfg.TasksPath(), t.ID, []int{*t.Parent}); err != nil {
+			return fmt.Errorf("invalid parent: %w", err)
+		}
+	}
+	if len(t.DependsOn) > 0 {
+		if err := task.ValidateDependencyIDs(cfg.TasksPath(), t.ID, t.DependsOn); err != nil {
+			return err
+		}
+	}
+	return nil
 }

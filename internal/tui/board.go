@@ -512,7 +512,6 @@ func (b *Board) executeCreate() (tea.Model, tea.Cmd) {
 	}
 
 	body := strings.TrimSpace(b.createBodyInput.Value())
-
 	priority := b.selectedCreatePriority()
 	tags := parseTagsCSV(b.createTagsInput.Value())
 
@@ -538,42 +537,25 @@ func (b *Board) executeCreate() (tea.Model, tea.Cmd) {
 	}
 	b.cfg.NextID = freshCfg.NextID
 
-	now := b.now()
-	id := b.cfg.NextID
-	t := &task.Task{
-		ID:       id,
+	params := board.CreateParams{
 		Title:    title,
 		Status:   b.createStatus,
 		Priority: priority,
-		Class:    b.cfg.Defaults.Class,
 		Tags:     tags,
 		Body:     body,
-		Created:  now,
-		Updated:  now,
 	}
 
-	slug := task.GenerateSlug(title)
-	filename := task.GenerateFilename(id, slug)
-	path := filepath.Join(b.cfg.TasksPath(), filename)
-
-	if err := task.Write(path, t); err != nil {
-		b.err = fmt.Errorf("creating task: %w", err)
-		b.resetCreateState()
-		b.view = viewBoard
-		return b, nil
-	}
-
-	b.cfg.NextID++
-	if err := b.cfg.Save(); err != nil {
-		b.err = fmt.Errorf("saving config after create: %w", err)
-	} else {
-		board.LogMutation(b.cfg.Dir(), "create", id, title)
-	}
+	result, createErr := board.Create(b.cfg, params, b.now())
 
 	b.resetCreateState()
 	b.view = viewBoard
 	b.loadTasks()
-	b.selectTaskByID(id)
+
+	if createErr != nil {
+		b.err = fmt.Errorf("creating task: %w", createErr)
+	} else {
+		b.selectTaskByID(result.Task.ID)
+	}
 	return b, nil
 }
 

@@ -11,8 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/antopolskiy/kanban-md/internal/board"
 	"github.com/antopolskiy/kanban-md/internal/clierr"
-	"github.com/antopolskiy/kanban-md/internal/config"
 	"github.com/antopolskiy/kanban-md/internal/date"
 	"github.com/antopolskiy/kanban-md/internal/filelock"
 	"github.com/antopolskiy/kanban-md/internal/output"
@@ -78,57 +78,18 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now()
 
-	t := &task.Task{
-		ID:       cfg.NextID,
-		Title:    title,
-		Status:   cfg.Defaults.Status,
-		Priority: cfg.Defaults.Priority,
-		Class:    cfg.Defaults.Class,
-		Created:  now,
-		Updated:  now,
-	}
-
-	if err := applyCreateFlags(cmd, t, cfg); err != nil {
+	params, err := buildCreateParams(cmd, title)
+	if err != nil {
 		return err
 	}
 
-	// Validate dependency references.
-	if err := validateDeps(cfg, t); err != nil {
+	result, err := board.Create(cfg, params, time.Now())
+	if err != nil {
 		return err
 	}
 
-	// Check WIP limit for the target status (class-aware).
-	if t.Class != "" && len(cfg.Classes) > 0 {
-		if err := enforceWIPLimitForClass(cfg, t, "", t.Status); err != nil {
-			return err
-		}
-	} else {
-		if err := enforceWIPLimit(cfg, "", t.Status); err != nil {
-			return err
-		}
-	}
-
-	// Generate filename and write.
-	slug := task.GenerateSlug(title)
-	filename := task.GenerateFilename(t.ID, slug)
-	path := filepath.Join(cfg.TasksPath(), filename)
-	t.File = path
-
-	if err := task.Write(path, t); err != nil {
-		return fmt.Errorf("writing task: %w", err)
-	}
-
-	// Increment next_id and save config.
-	cfg.NextID++
-	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
-
-	logActivity(cfg, "create", t.ID, t.Title)
-
-	return outputCreateResult(t, path)
+	return outputCreateResult(result.Task, result.Path)
 }
 
 func outputCreateResult(t *task.Task, path string) error {
@@ -167,63 +128,33 @@ func resolveCreateTitle(cmd *cobra.Command, args []string) (string, error) {
 	}
 }
 
-func applyCreateFlags(cmd *cobra.Command, t *task.Task, cfg *config.Config) error {
-	if err := applyCreateValidatedFlags(cmd, t, cfg); err != nil {
-		return err
-	}
-	if v, _ := cmd.Flags().GetString("assignee"); v != "" {
-		t.Assignee = v
-	}
-	if v, _ := cmd.Flags().GetStringSlice("tags"); len(v) > 0 {
-		t.Tags = v
-	}
+// buildCreateParams converts CLI flags into board.CreateParams.
+func buildCreateParams(cmd *cobra.Command, title string) (board.CreateParams, error) {
+	p := board.CreateParams{Title: title}
+
+	p.Status, _ = cmd.Flags().GetString("status")
+	p.Priority, _ = cmd.Flags().GetString("priority")
+	p.Class, _ = cmd.Flags().GetString("class")
+	p.Assignee, _ = cmd.Flags().GetString("assignee")
+	p.Tags, _ = cmd.Flags().GetStringSlice("tags")
+	p.Body, _ = cmd.Flags().GetString("body")
+	p.Estimate, _ = cmd.Flags().GetString("estimate")
+	p.Claimant, _ = cmd.Flags().GetString("claim")
+
 	if v, _ := cmd.Flags().GetString("due"); v != "" {
 		d, err := date.Parse(v)
 		if err != nil {
-			return task.FormatDueDate(v, err)
+			return p, task.FormatDueDate(v, err)
 		}
-		t.Due = &d
-	}
-	if v, _ := cmd.Flags().GetString("estimate"); v != "" {
-		t.Estimate = v
+		p.Due = &d
 	}
 	if cmd.Flags().Changed("parent") {
 		v, _ := cmd.Flags().GetInt("parent")
-		t.Parent = &v
+		p.Parent = &v
 	}
 	if v, _ := cmd.Flags().GetIntSlice("depends-on"); len(v) > 0 {
-		t.DependsOn = v
+		p.DependsOn = v
 	}
-	if v, _ := cmd.Flags().GetString("body"); v != "" {
-		t.Body = v
-	}
-	if v, _ := cmd.Flags().GetString("claim"); v != "" {
-		now := time.Now()
-		t.ClaimedBy = v
-		t.ClaimedAt = &now
-	}
-	return nil
-}
 
-// applyCreateValidatedFlags handles flags that require validation against config.
-func applyCreateValidatedFlags(cmd *cobra.Command, t *task.Task, cfg *config.Config) error {
-	if v, _ := cmd.Flags().GetString("status"); v != "" {
-		if err := task.ValidateStatus(v, cfg.StatusNames()); err != nil {
-			return err
-		}
-		t.Status = v
-	}
-	if v, _ := cmd.Flags().GetString("priority"); v != "" {
-		if err := task.ValidatePriority(v, cfg.Priorities); err != nil {
-			return err
-		}
-		t.Priority = v
-	}
-	if v, _ := cmd.Flags().GetString("class"); v != "" {
-		if err := task.ValidateClass(v, cfg.ClassNames()); err != nil {
-			return err
-		}
-		t.Class = v
-	}
-	return nil
+	return p, nil
 }

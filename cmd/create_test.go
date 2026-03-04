@@ -4,11 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/antopolskiy/kanban-md/internal/board"
 	"github.com/antopolskiy/kanban-md/internal/config"
-	"github.com/antopolskiy/kanban-md/internal/task"
 )
 
 // newCreateCmd creates a fresh cobra command with create flags for testing.
@@ -29,242 +30,224 @@ func newCreateCmd() *cobra.Command {
 	return cmd
 }
 
-func TestApplyCreateFlags_Status(t *testing.T) {
+func TestBuildCreateParams_Status(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("status", "in-progress")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{Status: "backlog"}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.Status != "in-progress" {
-		t.Errorf("status = %q, want %q", tk.Status, "in-progress")
+	if p.Status != "in-progress" {
+		t.Errorf("status = %q, want %q", p.Status, "in-progress")
 	}
 }
 
-func TestApplyCreateFlags_InvalidStatus(t *testing.T) {
-	cmd := newCreateCmd()
-	_ = cmd.Flags().Set("status", "nonexistent")
-
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	err := applyCreateFlags(cmd, tk, cfg)
-	if err == nil {
-		t.Fatal("expected error for invalid status")
-	}
-}
-
-func TestApplyCreateFlags_Priority(t *testing.T) {
+func TestBuildCreateParams_Priority(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("priority", priorityHigh)
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.Priority != priorityHigh {
-		t.Errorf("priority = %q, want %q", tk.Priority, priorityHigh)
+	if p.Priority != priorityHigh {
+		t.Errorf("priority = %q, want %q", p.Priority, priorityHigh)
 	}
 }
 
-func TestApplyCreateFlags_InvalidPriority(t *testing.T) {
-	cmd := newCreateCmd()
-	_ = cmd.Flags().Set("priority", "ultra")
-
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	err := applyCreateFlags(cmd, tk, cfg)
-	if err == nil {
-		t.Fatal("expected error for invalid priority")
-	}
-}
-
-func TestApplyCreateFlags_Assignee(t *testing.T) {
+func TestBuildCreateParams_Assignee(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("assignee", "alice")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.Assignee != "alice" {
-		t.Errorf("assignee = %q, want %q", tk.Assignee, "alice")
+	if p.Assignee != "alice" {
+		t.Errorf("assignee = %q, want %q", p.Assignee, "alice")
 	}
 }
 
-func TestApplyCreateFlags_Tags(t *testing.T) {
+func TestBuildCreateParams_Tags(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("tags", "bug,urgent")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tk.Tags) != 2 || tk.Tags[0] != "bug" || tk.Tags[1] != "urgent" {
-		t.Errorf("tags = %v, want [bug, urgent]", tk.Tags)
+	if len(p.Tags) != 2 || p.Tags[0] != "bug" || p.Tags[1] != "urgent" {
+		t.Errorf("tags = %v, want [bug, urgent]", p.Tags)
 	}
 }
 
-func TestApplyCreateFlags_Due(t *testing.T) {
+func TestBuildCreateParams_Due(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("due", "2025-06-15")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.Due == nil {
+	if p.Due == nil {
 		t.Fatal("due should be set")
 	}
-	if tk.Due.Year() != 2025 || tk.Due.Month() != 6 || tk.Due.Day() != 15 {
-		t.Errorf("due = %v, want 2025-06-15", tk.Due)
+	if p.Due.Year() != 2025 || p.Due.Month() != 6 || p.Due.Day() != 15 {
+		t.Errorf("due = %v, want 2025-06-15", p.Due)
 	}
 }
 
-func TestApplyCreateFlags_InvalidDue(t *testing.T) {
+func TestBuildCreateParams_InvalidDue(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("due", "not-a-date")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	err := applyCreateFlags(cmd, tk, cfg)
+	_, err := buildCreateParams(cmd, "test")
 	if err == nil {
 		t.Fatal("expected error for invalid due date")
 	}
 }
 
-func TestApplyCreateFlags_Estimate(t *testing.T) {
+func TestBuildCreateParams_Estimate(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("estimate", "4h")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.Estimate != "4h" {
-		t.Errorf("estimate = %q, want %q", tk.Estimate, "4h")
+	if p.Estimate != "4h" {
+		t.Errorf("estimate = %q, want %q", p.Estimate, "4h")
 	}
 }
 
-func TestApplyCreateFlags_Parent(t *testing.T) {
+func TestBuildCreateParams_Parent(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("parent", "5")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.Parent == nil || *tk.Parent != 5 {
-		t.Errorf("parent = %v, want 5", tk.Parent)
+	if p.Parent == nil || *p.Parent != 5 {
+		t.Errorf("parent = %v, want 5", p.Parent)
 	}
 }
 
-func TestApplyCreateFlags_DependsOn(t *testing.T) {
+func TestBuildCreateParams_DependsOn(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("depends-on", "2,3")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tk.DependsOn) != 2 || tk.DependsOn[0] != 2 || tk.DependsOn[1] != 3 {
-		t.Errorf("depends_on = %v, want [2, 3]", tk.DependsOn)
+	if len(p.DependsOn) != 2 || p.DependsOn[0] != 2 || p.DependsOn[1] != 3 {
+		t.Errorf("depends_on = %v, want [2, 3]", p.DependsOn)
 	}
 }
 
-func TestApplyCreateFlags_Body(t *testing.T) {
+func TestBuildCreateParams_Body(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("body", "task description")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.Body != "task description" {
-		t.Errorf("body = %q, want %q", tk.Body, "task description")
+	if p.Body != "task description" {
+		t.Errorf("body = %q, want %q", p.Body, "task description")
 	}
 }
 
-func TestApplyCreateFlags_Class(t *testing.T) {
+func TestBuildCreateParams_Class(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("class", "expedite")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.Class != "expedite" {
-		t.Errorf("class = %q, want %q", tk.Class, "expedite")
+	if p.Class != "expedite" {
+		t.Errorf("class = %q, want %q", p.Class, "expedite")
 	}
 }
 
-func TestApplyCreateFlags_InvalidClass(t *testing.T) {
-	cmd := newCreateCmd()
-	_ = cmd.Flags().Set("class", "invalid-class")
-
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	err := applyCreateFlags(cmd, tk, cfg)
-	if err == nil {
-		t.Fatal("expected error for invalid class")
-	}
-}
-
-func TestApplyCreateFlags_Claim(t *testing.T) {
+func TestBuildCreateParams_Claim(t *testing.T) {
 	cmd := newCreateCmd()
 	_ = cmd.Flags().Set("claim", "agent-test")
 
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{}
-
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.ClaimedBy != "agent-test" {
-		t.Errorf("claimed_by = %q, want %q", tk.ClaimedBy, "agent-test")
-	}
-	if tk.ClaimedAt == nil {
-		t.Error("claimed_at should be set")
+	if p.Claimant != "agent-test" {
+		t.Errorf("claimant = %q, want %q", p.Claimant, "agent-test")
 	}
 }
 
-func TestApplyCreateFlags_NoFlags(t *testing.T) {
+func TestBuildCreateParams_NoFlags(t *testing.T) {
 	cmd := newCreateCmd()
-	cfg := config.NewDefault("Test")
-	tk := &task.Task{Status: "backlog", Priority: "medium"}
 
-	if err := applyCreateFlags(cmd, tk, cfg); err != nil {
+	p, err := buildCreateParams(cmd, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if tk.Status != "backlog" {
-		t.Errorf("status should not change, got %q", tk.Status)
+	if p.Status != "" {
+		t.Errorf("status should be empty, got %q", p.Status)
 	}
-	if tk.Priority != "medium" {
-		t.Errorf("priority should not change, got %q", tk.Priority)
+	if p.Priority != "" {
+		t.Errorf("priority should be empty, got %q", p.Priority)
+	}
+}
+
+// --- Validation via board.Create ---
+
+func TestBoardCreate_InvalidStatus(t *testing.T) {
+	kanbanDir := setupBoard(t)
+	cfg, err := config.Load(kanbanDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = board.Create(cfg, board.CreateParams{
+		Title:  "test",
+		Status: "nonexistent",
+	}, time.Now())
+	if err == nil {
+		t.Fatal("expected error for invalid status")
+	}
+}
+
+func TestBoardCreate_InvalidPriority(t *testing.T) {
+	kanbanDir := setupBoard(t)
+	cfg, err := config.Load(kanbanDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = board.Create(cfg, board.CreateParams{
+		Title:    "test",
+		Priority: "ultra",
+	}, time.Now())
+	if err == nil {
+		t.Fatal("expected error for invalid priority")
+	}
+}
+
+func TestBoardCreate_InvalidClass(t *testing.T) {
+	kanbanDir := setupBoard(t)
+	cfg, err := config.Load(kanbanDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = board.Create(cfg, board.CreateParams{
+		Title: "test",
+		Class: "invalid-class",
+	}, time.Now())
+	if err == nil {
+		t.Fatal("expected error for invalid class")
 	}
 }
 
