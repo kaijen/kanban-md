@@ -367,8 +367,8 @@ func TestBoundary_ExecuteDelete_ReadError(t *testing.T) {
 	// Confirm delete.
 	b = sendKey(b, "y")
 	v = b.View()
-	if !containsStr(v, "reading task") {
-		t.Errorf("expected 'reading task' error in view, got:\n%s", v)
+	if !containsStr(v, "deleting task") {
+		t.Errorf("expected 'deleting task' error in view, got:\n%s", v)
 	}
 }
 

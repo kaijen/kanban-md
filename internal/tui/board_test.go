@@ -1686,8 +1686,8 @@ func TestBoard_DeleteTaskFileGone(t *testing.T) {
 	b = sendKey(b, "y")
 	v := b.View()
 
-	if !containsStr(v, "finding task") {
-		t.Error("expected 'finding task' error in view after file was removed")
+	if !containsStr(v, "task not found") {
+		t.Error("expected 'task not found' error in view after file was removed")
 	}
 }
 

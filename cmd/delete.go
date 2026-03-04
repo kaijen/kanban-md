@@ -64,23 +64,15 @@ func runDelete(cmd *cobra.Command, args []string) error {
 
 // deleteSingleTask handles a single task delete with confirmation and output.
 func deleteSingleTask(cfg *config.Config, id int, yes bool) error {
+	// Pre-read the task for confirmation prompt (before the actual delete).
 	path, err := task.FindByID(cfg.TasksPath(), id)
 	if err != nil {
 		return err
 	}
-
 	t, err := task.Read(path)
 	if err != nil {
 		return err
 	}
-
-	// Check claim before allowing delete.
-	if err = checkClaim(t, "", cfg.ClaimTimeoutDuration()); err != nil {
-		return err
-	}
-
-	// Warn if other tasks reference this one as a dependency or parent.
-	warnDependents(cfg.TasksPath(), t.ID)
 
 	// Require confirmation in TTY mode unless --yes.
 	if !yes {
@@ -98,58 +90,47 @@ func deleteSingleTask(cfg *config.Config, id int, yes bool) error {
 		}
 	}
 
-	if err := softDeleteAndLog(cfg, path, t); err != nil {
+	result, err := board.Delete(cfg, id, "", time.Now())
+	if err != nil {
 		return err
+	}
+	for _, w := range result.Warnings {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
 	}
 
 	if outputFormat() == output.FormatJSON {
 		return output.JSON(os.Stdout, map[string]interface{}{
 			"status": "deleted",
-			"id":     t.ID,
-			"title":  t.Title,
+			"id":     result.Task.ID,
+			"title":  result.Task.Title,
 		})
 	}
 
-	output.Messagef(os.Stdout, "Deleted task #%d: %s", t.ID, t.Title)
+	output.Messagef(os.Stdout, "Deleted task #%d: %s", result.Task.ID, result.Task.Title)
 	return nil
 }
 
-// executeDelete performs the core delete: find, read, claim check, warn dependents, remove, log.
+// executeDelete performs the core delete via the shared board.Delete.
 func executeDelete(cfg *config.Config, id int) error {
-	path, err := task.FindByID(cfg.TasksPath(), id)
+	result, err := board.Delete(cfg, id, "", time.Now())
 	if err != nil {
 		return err
 	}
-
-	t, err := task.Read(path)
-	if err != nil {
-		return err
+	for _, w := range result.Warnings {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
 	}
-
-	if err = checkClaim(t, "", cfg.ClaimTimeoutDuration()); err != nil {
-		return err
-	}
-
-	warnDependents(cfg.TasksPath(), t.ID)
-	return softDeleteAndLog(cfg, path, t)
+	return nil
 }
 
 // softDeleteAndLog archives the task and logs the delete action.
-func softDeleteAndLog(cfg *config.Config, path string, t *task.Task) error {
-	if t.Status == config.ArchivedStatus {
-		return nil
+// Kept for test compatibility; production paths use board.Delete directly.
+func softDeleteAndLog(cfg *config.Config, _ string, t *task.Task) error {
+	result, err := board.Delete(cfg, t.ID, "", time.Now())
+	if err != nil {
+		return err
 	}
-
-	oldStatus := t.Status
-	t.Status = config.ArchivedStatus
-	task.UpdateTimestamps(t, oldStatus, t.Status, cfg)
-	t.Updated = time.Now()
-
-	if err := task.Write(path, t); err != nil {
-		return fmt.Errorf("writing task: %w", err)
-	}
-
-	logActivity(cfg, "delete", t.ID, t.Title)
+	// Update the caller's task pointer to reflect the archived state.
+	*t = *result.Task
 	return nil
 }
 
