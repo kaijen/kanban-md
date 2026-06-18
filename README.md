@@ -533,6 +533,9 @@ In create/edit dialogs, text fields support cursor-based editing (`←/→`, `Ho
 | `m` | Move task to a different status (picker dialog) |
 | `n` / `p` | Move task to next / previous status |
 | `d` | Delete task (with confirmation) |
+| `s` | Cycle the sort field (priority → created → updated → title) |
+| `S` | Reverse the sort direction |
+| `/` | Search/filter tasks by title (case-insensitive substring, live). `Enter` keeps the filter, `Esc` clears it |
 | `r` | Refresh board |
 | `?` | Show help |
 | `q` / `Ctrl+C` | Quit |
