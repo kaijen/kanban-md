@@ -27,7 +27,7 @@ func init() {
 	listCmd.Flags().StringSlice("priority", nil, "filter by priority (comma-separated)")
 	listCmd.Flags().String("assignee", "", "filter by assignee")
 	listCmd.Flags().String("tag", "", "filter by tag")
-	listCmd.Flags().String("sort", "id", "sort field (id, status, priority, created, updated, due)")
+	listCmd.Flags().String("sort", "id", "sort field (id, title, status, priority, created, updated, due)")
 	listCmd.Flags().BoolP("reverse", "r", false, "reverse sort order")
 	listCmd.Flags().IntP("limit", "n", 0, "limit number of results")
 	listCmd.Flags().Bool("blocked", false, "show only blocked tasks")

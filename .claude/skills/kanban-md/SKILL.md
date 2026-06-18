@@ -85,7 +85,7 @@ kanban-md list [--status S] [--priority P] [--assignee A] [--tag T] \
   [--parent ID] [--unblocked]
 ```
 
-Sort fields: id, status, priority, created, updated, due. `-r` reverses.
+Sort fields: id, title, status, priority, created, updated, due. `-r` reverses.
 `--unblocked` shows tasks whose dependencies are all at terminal status.
 
 ### create

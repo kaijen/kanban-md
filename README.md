@@ -267,7 +267,7 @@ kanban-md list [FLAGS]
 | `--class` | | Filter by class of service |
 | `--archived` | false | Show only archived tasks |
 | `--group-by` | | Group results by field (assignee, tag, class, priority, status) |
-| `--sort` | id | Sort by: id, status, priority, created, updated, due |
+| `--sort` | id | Sort by: id, title, status, priority, created, updated, due |
 | `-r`, `--reverse` | false | Reverse sort order |
 | `-n`, `--limit` | 0 | Max results (0 = unlimited) |
 
