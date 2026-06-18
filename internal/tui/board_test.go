@@ -2482,3 +2482,112 @@ func TestBoard_SearchEmptyResultNoPanic(t *testing.T) {
 	b = sendKey(b, "l")
 	_ = b.View()
 }
+
+// setupIDSearchBoard builds a board with IDs chosen to exercise ID-prefix vs
+// exact ID search: #3 (Gamma), #12 (Alpha), #121 (Beta).
+func setupIDSearchBoard(t *testing.T) *tui.Board {
+	t.Helper()
+
+	dir := t.TempDir()
+	kanbanDir := filepath.Join(dir, "kanban")
+	tasksDir := filepath.Join(kanbanDir, "tasks")
+	if err := os.MkdirAll(tasksDir, 0o750); err != nil {
+		t.Fatalf("creating dirs: %v", err)
+	}
+
+	cfg := config.NewDefault("ID Search Board")
+	cfg.SetDir(kanbanDir)
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	tasks := []struct {
+		id    int
+		title string
+	}{
+		{3, "Gamma"},
+		{12, "Alpha"},
+		{121, "Beta"},
+	}
+	for _, tt := range tasks {
+		tk := &task.Task{ID: tt.id, Title: tt.title, Status: "backlog", Priority: "medium", Updated: testRefTime}
+		path := filepath.Join(tasksDir, task.GenerateFilename(tt.id, tt.title))
+		if err := task.Write(path, tk); err != nil {
+			t.Fatalf("writing task: %v", err)
+		}
+	}
+
+	b := tui.NewBoard(cfg)
+	b.SetNow(testNow)
+	b.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	return b
+}
+
+func typeSearch(b *tui.Board, query string) *tui.Board {
+	b = sendKey(b, "/")
+	for _, r := range query {
+		b = sendKey(b, string(r))
+	}
+	return b
+}
+
+func TestBoard_SearchByIDPrefix(t *testing.T) {
+	b := setupIDSearchBoard(t)
+
+	// "#12" prefix-matches both #12 (Alpha) and #121 (Beta), excludes #3 (Gamma).
+	b = typeSearch(b, "#12")
+	v := b.View()
+	if !containsStr(v, "Alpha") {
+		t.Error("expected #12 Alpha to match prefix #12")
+	}
+	if !containsStr(v, "Beta") {
+		t.Error("expected #121 Beta to match prefix #12")
+	}
+	if containsStr(v, "Gamma") {
+		t.Error("expected #3 Gamma to be filtered out by prefix #12")
+	}
+}
+
+func TestBoard_SearchByIDExactWithTrailingSpace(t *testing.T) {
+	b := setupIDSearchBoard(t)
+
+	// "#12 " (trailing space) requires an exact ID match: only #12 (Alpha).
+	b = typeSearch(b, "#12 ")
+	v := b.View()
+	if !containsStr(v, "Alpha") {
+		t.Error("expected #12 Alpha to match exact #12")
+	}
+	if containsStr(v, "Beta") {
+		t.Error("expected #121 Beta to be excluded by exact #12 (trailing space)")
+	}
+	if containsStr(v, "Gamma") {
+		t.Error("expected #3 Gamma to be excluded by exact #12")
+	}
+}
+
+func TestBoard_SearchByIDBareHashShowsAll(t *testing.T) {
+	b := setupIDSearchBoard(t)
+
+	// A bare "#" with no digits yet does not filter anything out.
+	b = typeSearch(b, "#")
+	v := b.View()
+	for _, want := range []string{"Alpha", "Beta", "Gamma"} {
+		if !containsStr(v, want) {
+			t.Errorf("expected %q visible for bare # query", want)
+		}
+	}
+}
+
+func TestBoard_SearchByIDTitleModeUnaffected(t *testing.T) {
+	b := setupIDSearchBoard(t)
+
+	// Without a leading #, the query stays a title substring match.
+	b = typeSearch(b, "alph")
+	v := b.View()
+	if !containsStr(v, "Alpha") {
+		t.Error("expected title search to match Alpha")
+	}
+	if containsStr(v, "Beta") || containsStr(v, "Gamma") {
+		t.Error("expected only Alpha for title query 'alph'")
+	}
+}

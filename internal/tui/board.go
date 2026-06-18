@@ -353,9 +353,40 @@ func (b *Board) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	m, cmd := b.searchInput.Update(msg)
 	b.searchInput = m
-	b.filterQuery = strings.ToLower(strings.TrimSpace(b.searchInput.Value()))
+	// Store the raw value (not trimmed) so a trailing space in ID search mode
+	// remains significant; matchesFilter handles trimming/case per mode.
+	b.filterQuery = b.searchInput.Value()
 	b.loadTasks()
 	return b, cmd
+}
+
+// matchesFilter reports whether task t matches the active search query.
+//
+// A query starting with "#" searches ticket IDs: while typing, the digits
+// prefix-match the ID ("#12" matches #12, #121, ...), and a trailing space
+// ("#12 ") requires an exact ID match (only #12). A bare "#" (no digits yet)
+// matches everything. Any other query is a case-insensitive substring match
+// on the title.
+func matchesFilter(t *task.Task, query string) bool {
+	if strings.HasPrefix(query, "#") {
+		rest := query[1:]
+		exact := strings.HasSuffix(rest, " ")
+		digits := strings.TrimSpace(rest)
+		if digits == "" {
+			return true
+		}
+		id := strconv.Itoa(t.ID)
+		if exact {
+			return id == digits
+		}
+		return strings.HasPrefix(id, digits)
+	}
+
+	needle := strings.TrimSpace(strings.ToLower(query))
+	if needle == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(t.Title), needle)
 }
 
 func (b *Board) handleNavigation(k string) {
@@ -859,15 +890,14 @@ func (b *Board) loadTasks() {
 	}
 	b.err = nil
 
-	// Filter out archived tasks and (when active) titles not matching the
+	// Filter out archived tasks and (when active) tasks not matching the
 	// search query from the TUI display.
-	q := b.filterQuery // already lowercased when set
 	var visibleTasks []*task.Task
 	for _, t := range tasks {
 		if b.cfg.IsArchivedStatus(t.Status) {
 			continue
 		}
-		if q != "" && !strings.Contains(strings.ToLower(t.Title), q) {
+		if !matchesFilter(t, b.filterQuery) {
 			continue
 		}
 		visibleTasks = append(visibleTasks, t)
@@ -2043,7 +2073,7 @@ func (b *Board) viewHelp() string {
 		{"d", "Delete task"},
 		{"s", "Cycle sort field (priority/created/updated/title)"},
 		{"S", "Reverse sort direction"},
-		{"/", "Search/filter by title"},
+		{"/", "Search by title, or by ID with #12 (trailing space = exact)"},
 		{"r", "Refresh board"},
 		{"?", "Show this help"},
 		{"esc/q", "Quit"},
